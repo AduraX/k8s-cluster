@@ -1,0 +1,74 @@
+{% set first_server = groups[rke2_servers_group_name][0] %}
+{% if inventory_hostname != first_server %}
+server: https://{{ rke2_api_ip }}:{{ rke2_api_port }}
+{% endif %}
+{% if rke2_bind_address | default('', true) | length > 0 %}
+bind-address: {{ rke2_bind_address }}
+{% endif %}
+{% if rke2_agent_token | default('', true) | length > 0 %}
+agent-token: {{ rke2_agent_token }}
+{% endif %}
+token: {{ rke2_token }}
+data-dir: {{ rke2_data_path }}
+node-name: {{ rke2_node_name }}
+snapshotter: {{ rke2_snapshotter }}
+{% if inventory_hostname in groups[rke2_servers_group_name] %}
+cni: {{ rke2_cni }}
+tls-san:
+  - cluster.local
+  - {{ rke2_api_ip }}
+{% for san in rke2_additional_sans %}
+  - {{ san }}
+{% endfor %}
+{% if rke2_disable | length > 0 %}
+disable: {{ rke2_disable }}
+{% endif %}
+{% if rke2_ingress_controller is string %}
+ingress-controller: {{ rke2_ingress_controller }}
+{% else %}
+ingress-controller:
+{% for item in rke2_ingress_controller %}
+  - {{ item }}
+{% endfor %}
+{% endif %}
+{% endif %}
+{% set node_taints = rke2_server_node_taints if inventory_hostname in groups[rke2_servers_group_name] else rke2_agent_node_taints %}
+{% if node_taints | length > 0 %}
+node-taint:
+{% for taint in node_taints %}
+  - {{ taint }}
+{% endfor %}
+{% endif %}
+{% if rke2_cluster_domain | default('', true) | length > 0 %}
+cluster-domain: {{ rke2_cluster_domain }}
+{% endif %}
+cluster-cidr: "{{ rke2_cluster_cidr | join(',') }}"
+service-cidr: "{{ rke2_service_cidr | join(',') }}"
+{% if rke2_disable_default_registry_endpoint | bool %}
+disable-default-registry-endpoint: true
+{% endif %}
+{% if disable_kube_proxy | bool %}
+disable-kube-proxy: true
+{% endif %}
+{% if rke2_debug | bool %}
+debug: true
+{% endif %}
+{% if rke2_selinux | bool %}
+selinux: true
+{% endif %}
+{% if rke2_disable_cloud_controller | bool %}
+disable-cloud-controller: true
+{% if rke2_cloud_provider_name != false %}
+cloud-provider-name: "{{ rke2_cloud_provider_name }}"
+{% endif %}
+{% endif %}
+{% set extra_options = rke2_server_options if inventory_hostname in groups[rke2_servers_group_name] else rke2_agent_options %}
+{% for option in extra_options %}
+{% if option is mapping %}
+{% for key, value in option.items() %}
+{{ key }}: {{ value }}
+{% endfor %}
+{% else %}
+{{ option }}
+{% endif %}
+{% endfor %}

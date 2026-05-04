@@ -1,0 +1,93 @@
+---
+- name: Validate Harbor image mode
+  ansible.builtin.assert:
+    that:
+      - rke2_harbor_image_mode in ['mirrored', 'airgap', 'upstream']
+    fail_msg: "rke2_harbor_image_mode must be one of: mirrored, airgap, upstream"
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+- name: Configure Harbor projects and proxy registries
+  when:
+    - rke2_harbor_setup_enabled | bool
+    - rke2_harbor_image_mode in ['mirrored', 'airgap']
+  run_once: true
+  delegate_to: localhost
+  become: false
+  block:
+    - name: Create Harbor airgap projects
+      ansible.builtin.uri:
+        url: "https://{{ rke2_harbor_url }}/api/v2.0/projects"
+        method: POST
+        user: "{{ rke2_harbor_username }}"
+        password: "{{ rke2_harbor_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ rke2_harbor_validate_certs }}"
+        body_format: json
+        body:
+          project_name: "airgapped-{{ item.name }}"
+          public: true
+        status_code: [201, 409]
+      loop: "{{ rke2_harbor_registries }}"
+      when: rke2_harbor_image_mode == 'airgap'
+
+    - name: Create Harbor proxy registries
+      ansible.builtin.uri:
+        url: "https://{{ rke2_harbor_url }}/api/v2.0/registries"
+        method: POST
+        user: "{{ rke2_harbor_username }}"
+        password: "{{ rke2_harbor_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ rke2_harbor_validate_certs }}"
+        body_format: json
+        body:
+          url: "{{ item.url }}"
+          name: "{{ item.name }}"
+          type: "{{ item.type }}"
+          insecure: true
+        status_code: [201, 409]
+      loop: "{{ rke2_harbor_registries }}"
+      when: rke2_harbor_image_mode == 'mirrored'
+
+    - name: Read Harbor proxy registries
+      ansible.builtin.uri:
+        url: "https://{{ rke2_harbor_url }}/api/v2.0/registries"
+        method: GET
+        user: "{{ rke2_harbor_username }}"
+        password: "{{ rke2_harbor_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ rke2_harbor_validate_certs }}"
+        return_content: true
+      register: harbor_registry_response
+      when: rke2_harbor_image_mode == 'mirrored'
+
+    - name: Create Harbor mirrored proxy-cache projects
+      ansible.builtin.uri:
+        url: "https://{{ rke2_harbor_url }}/api/v2.0/projects"
+        method: POST
+        user: "{{ rke2_harbor_username }}"
+        password: "{{ rke2_harbor_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ rke2_harbor_validate_certs }}"
+        body_format: json
+        body:
+          project_name: "mirrored-{{ item.name }}"
+          public: true
+          registry_id: >-
+            {{
+              (
+                (harbor_registry_response.json | selectattr('name', 'equalto', item.name) | list | first)
+                | default((harbor_registry_response.json | selectattr('url', 'equalto', item.url) | list | first), true)
+              ).id
+            }}
+        status_code: [201, 409]
+      loop: "{{ rke2_harbor_registries }}"
+      when: rke2_harbor_image_mode == 'mirrored'
+
+- name: Push airgap images into Harbor
+  ansible.builtin.include_tasks: push_airgap_images.yml
+  when:
+    - rke2_harbor_setup_enabled | bool
+    - rke2_harbor_image_mode == 'airgap'
+    - rke2_harbor_push_airgap_images | bool

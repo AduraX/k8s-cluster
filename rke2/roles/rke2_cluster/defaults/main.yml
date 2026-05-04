@@ -1,0 +1,83 @@
+---
+rke2_allow_downgrade: false
+rke2_servers_group_name: masters
+rke2_agents_group_name: workers
+rke2_cluster_group_name: k8s_cluster
+
+rke2_type: "{{ 'server' if inventory_hostname in groups[rke2_servers_group_name] else 'agent' }}"
+rke2_service_name: "rke2-{{ rke2_type }}.service"
+rke2_node_name: "{{ inventory_hostname }}"
+
+rke2_version: v1.35.3+rke2r3
+rke2_channel_url: https://update.rke2.io/v1-release/channels
+rke2_channel: stable
+rke2_method: tar
+rke2_install_bash_url: https://get.rke2.io
+rke2_install_script_dir: /var/tmp
+rke2_data_path: /var/lib/rancher/rke2
+
+rke2_architecture: amd64
+rke2_artifact_url: https://github.com/rancher/rke2/releases/download/
+rke2_artifact_path: /rke2/artifact
+rke2_artifact_fetch_timeout: 30
+rke2_artifact:
+  - sha256sum-{{ rke2_architecture }}.txt
+  - rke2.linux-{{ rke2_architecture }}.tar.gz
+rke2_artifact_source: upstream
+rke2_airgap_mode: false
+rke2_airgap_implementation: download
+rke2_airgap_copy_sourcepath: local_artifacts
+rke2_airgap_copy_additional_tarballs: []
+rke2_tarball_images_path: "{{ rke2_data_path }}/agent/images"
+
+rke2_ha_mode: false
+rke2_ha_mode_keepalived: false
+rke2_api_ip: "{{ hostvars[groups[rke2_servers_group_name][0]].ansible_host }}"
+rke2_api_port: 9345
+rke2_api_cidr: 32
+rke2_interface: "{{ ansible_facts.default_ipv4.interface | default('eth0') }}"
+rke2_keepalived_router_id: 51
+rke2_keepalived_auth_pass: rke2servers
+
+rke2_token: defaultSecret12345
+rke2_agent_token:
+rke2_bind_address:
+rke2_cluster_domain:
+rke2_additional_sans: []
+rke2_server_node_taints: []
+rke2_agent_node_taints: []
+rke2_disable: []
+rke2_cni: [canal]
+rke2_snapshotter: overlayfs
+rke2_cluster_cidr:
+  - 10.42.0.0/16
+rke2_service_cidr:
+  - 10.43.0.0/16
+rke2_ingress_controller: ingress-nginx
+rke2_disable_default_registry_endpoint: false
+disable_kube_proxy: false
+rke2_debug: false
+rke2_selinux: false
+rke2_disable_cloud_controller: false
+rke2_cloud_provider_name: external
+
+rke2_server_options: []
+rke2_agent_options: []
+rke2_environment_options: []
+
+rke2_use_custom_registry: false
+rke2_custom_registry_url: harbor.util.lcl
+rke2_custom_registry_prefix: mirrored
+rke2_custom_registry_username: admin
+rke2_custom_registry_password: Admin001
+rke2_custom_registry_insecure_skip_verify: true
+rke2_custom_registry_ca_certificates: []
+#  - src: /path/to/harbor-ca.crt
+#    dest: /usr/local/share/ca-certificates/harbor-ca.crt
+
+rke2_download_kubeconf: false
+rke2_download_kubeconf_file_name: rke2.yaml
+rke2_download_kubeconf_path: /tmp
+
+rke2_wait_retries: 60
+rke2_wait_delay: 10

@@ -1,0 +1,104 @@
+- name: Deploy RKE2
+  hosts: all
+  become: yes
+  vars:
+    rke2_token: Kokoro!-~Secret12345
+    rke2_version: v1.35.3+rke2r3
+    rke2_architecture: amd64
+    rke2_download_kubeconf_file_name: rke2-kubeconfig
+    rke2_download_kubeconf_path: ./
+    rke2_download_kubeconf: true 
+
+    rke2_api_ip: 192.168.58.101
+    rke2_image_mode: mirrored # mirrored, airgap, upstream
+    rke2_harbor_registry_url: harbor.util.lcl
+    rke2_use_custom_registry: "{{ rke2_image_mode in ['mirrored', 'airgap'] }}"
+    rke2_disable_default_registry_endpoint: "{{ rke2_image_mode in ['mirrored', 'airgap'] }}"
+    rke2_configure_harbor: false
+    rke2_push_airgap_images: false
+    rke2_node_prepare_enabled: false
+    rke2_storage_prepare_enabled: false
+    rke2_airgap_image_list: "{{ playbook_dir }}/rke2_imagelist.txt"
+    rke2_environment_options:
+      - "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/var/lib/rancher/rke2/bin"
+      - "CONTAINERD_NAMESPACE=k8s.io"
+      - "CONTAINERD_ADDRESS=/run/k3s/containerd/containerd.sock"
+      - "CONTAINER_RUNTIME_ENDPOINT=unix:///run/k3s/containerd/containerd.sock"
+      - "IMAGE_SERVICE_ENDPOINT=unix:///run/k3s/containerd/containerd.sock"
+
+    rke2_additional_sans:
+      - svc
+      - k8s.lcl
+      - util.lcl
+      - cluster.local
+            
+    disable_kube_proxy: false # true    
+    rke2_disable:  # rke2-canal, rke2-coredns, rke2-ingress-nginx, rke2-metrics-server
+      - rke2-canal  
+      - rke2-ingress-nginx  
+    rke2_ingress_controller: none  # possible values: none, nginx
+    rke2_cni:
+      - calico # canal calico cilium  
+
+    rke2_server_options:
+      - "node-ip: {{ ansible_host }}"
+    rke2_agent_options:
+      - "node-ip: {{ ansible_host }}"
+
+    rke2_server_node_taints: []
+    rke2_install_script_dir: /var/tmp
+    rke2_data_path: "/var/lib/rancher/rke2"
+    rke2_artifact_path: /rke2/artifact 
+
+    rke2_artifact_source: copy # upstream, copy, download, exists
+    rke2_airgap_mode: "{{ rke2_image_mode == 'airgap' }}"
+    rke2_airgap_implementation: copy # download  copy  exists
+    rke2_airgap_copy_sourcepath: dataDir/artifact
+
+    rke2_artifact:
+      - sha256sum-{{ rke2_architecture }}.txt
+      - rke2.linux-{{ rke2_architecture }}.tar.gz
+
+    rke2_custom_registry_url: "{{ rke2_harbor_registry_url }}"
+    rke2_custom_registry_prefix: "{{ 'airgapped' if rke2_image_mode == 'airgap' else 'mirrored' }}"
+    rke2_custom_registry_mirrors: []
+    rke2_custom_registry_username: admin
+    rke2_custom_registry_password: Admin001
+    rke2_custom_registry_insecure_skip_verify: true
+        
+  pre_tasks:
+    - name: Validate RKE2 image mode
+      ansible.builtin.assert:
+        that:
+          - rke2_image_mode in ['mirrored', 'airgap', 'upstream']
+        fail_msg: "rke2_image_mode must be one of: mirrored, airgap, upstream"
+
+  roles:
+     - role: rke2_artifact_prepare
+     - role: rke2_node_prepare
+     - role: rke2_storage_prepare
+     - role: rke2_harbor_setup
+       vars:
+         rke2_harbor_setup_enabled: "{{ rke2_configure_harbor }}"
+         rke2_harbor_url: "{{ rke2_harbor_registry_url }}"
+         rke2_harbor_username: "{{ rke2_custom_registry_username }}"
+         rke2_harbor_password: "{{ rke2_custom_registry_password }}"
+         rke2_harbor_image_mode: "{{ rke2_image_mode }}"
+         rke2_harbor_push_airgap_images: "{{ rke2_push_airgap_images }}"
+         rke2_harbor_airgap_image_list: "{{ rke2_airgap_image_list }}"
+     - role: rke2_cluster
+
+  post_tasks:
+    - name: Apply control-plane workload isolation taint after cluster installation
+      ansible.builtin.command:
+        cmd: >-
+          {{ rke2_data_path }}/bin/kubectl
+          --kubeconfig /etc/rancher/rke2/rke2.yaml
+          taint node {{ hostvars[item].rke2_node_name | default(item) }}
+          CriticalAddonsOnly=true:NoExecute --overwrite
+      loop: "{{ groups['masters'] }}"
+      delegate_to: "{{ groups['masters'][0] }}"
+      run_once: true
+      changed_when: true
+      when: not ansible_check_mode
+     

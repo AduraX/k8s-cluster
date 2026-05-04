@@ -1,0 +1,302 @@
+---
+- name: Validate inventory groups
+  ansible.builtin.assert:
+    that:
+      - groups[rke2_servers_group_name] | length > 0
+      - inventory_hostname in groups[rke2_servers_group_name] or inventory_hostname in (groups[rke2_agents_group_name] | default([]))
+    fail_msg: "Each target host must be in {{ rke2_servers_group_name }} or {{ rke2_agents_group_name }}."
+
+- name: Validate RKE2 artifact source
+  ansible.builtin.assert:
+    that:
+      - rke2_artifact_source in ['upstream', 'copy', 'download', 'exists']
+    fail_msg: "rke2_artifact_source must be one of: upstream, copy, download, exists"
+
+- name: Set RKE2 role facts
+  ansible.builtin.set_fact:
+    rke2_first_server: "{{ groups[rke2_servers_group_name][0] }}"
+    rke2_service_name: "rke2-{{ rke2_type }}.service"
+
+- name: Create RKE2 config directory
+  ansible.builtin.file:
+    path: /etc/rancher/rke2
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install registry CA certificates when TLS verification is enabled
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: >-
+      {{
+        item.dest | default(
+          ('/usr/local/share/ca-certificates/' if ansible_facts.os_family == 'Debian' else '/etc/pki/ca-trust/source/anchors/')
+          ~ (item.src | basename)
+        )
+      }}
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ rke2_custom_registry_ca_certificates }}"
+  when:
+    - rke2_use_custom_registry | bool
+    - not (rke2_custom_registry_insecure_skip_verify | bool)
+    - rke2_custom_registry_ca_certificates | length > 0
+  notify: Update CA trust
+
+- name: Install keepalived on HA server nodes
+  ansible.builtin.package:
+    name: keepalived
+    state: present
+  when:
+    - rke2_ha_mode | bool
+    - rke2_ha_mode_keepalived | bool
+    - inventory_hostname in groups[rke2_servers_group_name]
+
+- name: Configure keepalived on HA server nodes
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - rke2_ha_mode | bool
+    - rke2_ha_mode_keepalived | bool
+    - inventory_hostname in groups[rke2_servers_group_name]
+  notify: Restart keepalived
+
+- name: Enable keepalived on HA server nodes
+  ansible.builtin.systemd:
+    name: keepalived
+    enabled: true
+    state: started
+  when:
+    - rke2_ha_mode | bool
+    - rke2_ha_mode_keepalived | bool
+    - inventory_hostname in groups[rke2_servers_group_name]
+
+- name: Download RKE2 install script
+  ansible.builtin.get_url:
+    url: "{{ rke2_install_bash_url }}"
+    dest: "{{ rke2_install_script_dir }}/rke2.sh"
+    mode: "0700"
+    timeout: "{{ rke2_artifact_fetch_timeout }}"
+  when: rke2_artifact_source == 'upstream'
+
+- name: Copy local RKE2 install script
+  ansible.builtin.copy:
+    src: "{{ rke2_airgap_copy_sourcepath }}/rke2.sh"
+    dest: "{{ rke2_install_script_dir }}/rke2.sh"
+    mode: "0700"
+    force: true
+  when:
+    - rke2_artifact_source == 'copy'
+
+- name: Create RKE2 artifact directory
+  ansible.builtin.file:
+    path: "{{ rke2_artifact_path }}"
+    state: directory
+    mode: "0700"
+  when:
+    - rke2_artifact_source in ['copy', 'download']
+
+- name: Copy local RKE2 artifacts
+  ansible.builtin.copy:
+    src: "{{ rke2_airgap_copy_sourcepath }}/{{ item }}"
+    dest: "{{ rke2_artifact_path }}/{{ item }}"
+    mode: "0640"
+    force: true
+  loop: "{{ rke2_artifact }}"
+  when:
+    - rke2_artifact_source == 'copy'
+
+- name: Download RKE2 artifacts on target nodes
+  ansible.builtin.get_url:
+    url: "{{ rke2_artifact_url }}/{{ rke2_version | replace('+', '%2B') }}/{{ item }}"
+    dest: "{{ rke2_artifact_path }}/{{ item }}"
+    mode: "0640"
+    timeout: "{{ rke2_artifact_fetch_timeout }}"
+  loop: "{{ rke2_artifact }}"
+  when:
+    - rke2_artifact_source == 'download'
+
+- name: Copy additional airgap image tarballs
+  block:
+    - name: Create additional airgap image tarball directory
+      ansible.builtin.file:
+        path: "{{ rke2_tarball_images_path }}"
+        state: directory
+        mode: "0700"
+
+    - name: Copy additional airgap image tarballs
+      ansible.builtin.copy:
+        src: "{{ rke2_airgap_copy_sourcepath }}/{{ item }}"
+        dest: "{{ rke2_tarball_images_path }}/{{ item }}"
+        mode: "0644"
+        force: true
+      loop: "{{ rke2_airgap_copy_additional_tarballs }}"
+  when:
+    - rke2_artifact_source in ['copy', 'download', 'exists']
+    - rke2_airgap_copy_additional_tarballs | length > 0
+
+- name: Validate existing RKE2 artifacts
+  ansible.builtin.stat:
+    path: "{{ rke2_artifact_path }}/{{ item }}"
+  register: rke2_existing_artifacts
+  loop: "{{ rke2_artifact }}"
+  when:
+    - rke2_artifact_source == 'exists'
+
+- name: Fail when required airgap artifacts are missing
+  ansible.builtin.assert:
+    that:
+      - rke2_existing_artifacts.results | map(attribute='stat.exists') | min
+    fail_msg: "One or more required RKE2 airgap artifacts are missing from {{ rke2_artifact_path }}."
+  when:
+    - rke2_artifact_source == 'exists'
+
+- name: Validate existing RKE2 install script
+  ansible.builtin.stat:
+    path: "{{ rke2_install_script_dir }}/rke2.sh"
+  register: rke2_existing_install_script
+  when:
+    - rke2_artifact_source == 'exists'
+
+- name: Fail when RKE2 install script is missing in airgap exists mode
+  ansible.builtin.assert:
+    that:
+      - rke2_existing_install_script.stat.exists
+      - rke2_existing_install_script.stat.executable
+    fail_msg: "{{ rke2_install_script_dir }}/rke2.sh must exist and be executable."
+  when:
+    - rke2_artifact_source == 'exists'
+
+- name: Render RKE2 config
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: /etc/rancher/rke2/config.yaml
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart RKE2
+
+- name: Render containerd registry config
+  ansible.builtin.template:
+    src: registries.yaml.j2
+    dest: /etc/rancher/rke2/registries.yaml
+    owner: root
+    group: root
+    mode: "0600"
+  when: rke2_use_custom_registry | bool
+  notify: Restart RKE2
+
+- name: Remove containerd registry config in upstream mode
+  ansible.builtin.file:
+    path: /etc/rancher/rke2/registries.yaml
+    state: absent
+  when: not rke2_use_custom_registry | bool
+  notify: Restart RKE2
+
+- name: Render RKE2 service environment
+  ansible.builtin.template:
+    src: rke2_environment.j2
+    dest: "/etc/default/rke2-{{ rke2_type }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: rke2_environment_options | length > 0
+  notify: Restart RKE2
+
+- name: Install RKE2 from local artifacts
+  ansible.builtin.command:
+    cmd: "{{ rke2_install_script_dir }}/rke2.sh"
+  environment:
+    INSTALL_RKE2_TYPE: "{{ rke2_type }}"
+    INSTALL_RKE2_METHOD: "{{ rke2_method }}"
+    INSTALL_RKE2_ARTIFACT_PATH: "{{ rke2_artifact_path }}"
+    INSTALL_RKE2_AGENT_IMAGES_DIR: "{{ rke2_data_path }}/agent/images"
+  changed_when: false
+  when:
+    - not ansible_check_mode
+    - rke2_artifact_source in ['copy', 'download', 'exists']
+
+- name: Install RKE2 from upstream release
+  ansible.builtin.command:
+    cmd: "{{ rke2_install_script_dir }}/rke2.sh"
+  environment:
+    INSTALL_RKE2_TYPE: "{{ rke2_type }}"
+    INSTALL_RKE2_METHOD: "{{ rke2_method }}"
+    INSTALL_RKE2_VERSION: "{{ rke2_version }}"
+    INSTALL_RKE2_CHANNEL_URL: "{{ rke2_channel_url }}"
+    INSTALL_RKE2_CHANNEL: "{{ rke2_channel }}"
+  changed_when: false
+  when:
+    - not ansible_check_mode
+    - rke2_artifact_source == 'upstream'
+
+- name: Start first RKE2 server
+  ansible.builtin.systemd:
+    name: rke2-server.service
+    state: started
+    enabled: true
+  when:
+    - inventory_hostname == rke2_first_server
+    - not ansible_check_mode
+
+- name: Wait for first RKE2 server API
+  ansible.builtin.command:
+    cmd: "{{ rke2_data_path }}/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get --raw=/readyz"
+  register: rke2_readyz
+  changed_when: false
+  until: rke2_readyz.rc == 0
+  retries: "{{ rke2_wait_retries }}"
+  delay: "{{ rke2_wait_delay }}"
+  when:
+    - inventory_hostname == rke2_first_server
+    - not ansible_check_mode
+
+- name: Start remaining RKE2 servers and agents
+  ansible.builtin.systemd:
+    name: "{{ rke2_service_name }}"
+    state: started
+    enabled: true
+  when:
+    - inventory_hostname != rke2_first_server
+    - not ansible_check_mode
+
+- name: Wait for all RKE2 nodes to be Ready
+  ansible.builtin.command:
+    cmd: >-
+      {{ rke2_data_path }}/bin/kubectl
+      --kubeconfig /etc/rancher/rke2/rke2.yaml
+      wait node --all --for=condition=Ready --timeout=30s
+  register: rke2_nodes_ready
+  changed_when: false
+  until: rke2_nodes_ready.rc == 0
+  retries: "{{ rke2_wait_retries }}"
+  delay: "{{ rke2_wait_delay }}"
+  run_once: true
+  delegate_to: "{{ rke2_first_server }}"
+  when: not ansible_check_mode
+
+- name: Download kubeconfig to Ansible controller
+  ansible.builtin.fetch:
+    src: /etc/rancher/rke2/rke2.yaml
+    dest: "{{ rke2_download_kubeconf_path }}/{{ rke2_download_kubeconf_file_name }}"
+    flat: true
+  when:
+    - rke2_download_kubeconf | bool
+    - inventory_hostname == rke2_first_server
+
+- name: Rewrite downloaded kubeconfig endpoint
+  ansible.builtin.replace:
+    path: "{{ rke2_download_kubeconf_path }}/{{ rke2_download_kubeconf_file_name }}"
+    regexp: 'https://127\.0\.0\.1:6443'
+    replace: "https://{{ rke2_api_ip }}:6443"
+  delegate_to: localhost
+  become: false
+  when:
+    - rke2_download_kubeconf | bool
+    - inventory_hostname == rke2_first_server

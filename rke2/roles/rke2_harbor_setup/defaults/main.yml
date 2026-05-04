@@ -1,0 +1,31 @@
+---
+rke2_harbor_setup_enabled: false
+rke2_harbor_url: harbor.util.lcl
+rke2_harbor_username: admin
+rke2_harbor_password: Admin001
+rke2_harbor_validate_certs: false
+rke2_harbor_image_mode: mirrored
+rke2_harbor_push_airgap_images: false
+rke2_harbor_airgap_image_list: rke2_imagelist.txt
+
+rke2_harbor_registries:
+  - key: docker
+    name: docker.io
+    url: https://hub.docker.com
+    type: docker-hub
+  - key: quay
+    name: quay.io
+    url: https://quay.io
+    type: docker-registry
+  - key: k8s
+    name: k8s.io
+    url: https://registry.k8s.io
+    type: docker-registry
+  - key: gcr
+    name: gcr.io
+    url: https://gcr.io
+    type: docker-registry
+  - key: ghcr
+    name: ghcr.io
+    url: https://ghcr.io
+    type: github-ghcr

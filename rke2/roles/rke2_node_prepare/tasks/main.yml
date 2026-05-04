@@ -1,0 +1,75 @@
+---
+- name: Persist Kubernetes kernel modules
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/k8s.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ rke2_node_prepare_kernel_modules | join('\n') }}\n"
+  when:
+    - rke2_node_prepare_enabled | bool
+    - rke2_node_prepare_kernel_modules | length > 0
+
+- name: Load Kubernetes kernel modules
+  ansible.builtin.command: "modprobe {{ item }}"
+  loop: "{{ rke2_node_prepare_kernel_modules }}"
+  changed_when: false
+  when:
+    - rke2_node_prepare_enabled | bool
+    - rke2_node_prepare_kernel_modules | length > 0
+
+- name: Persist Kubernetes sysctl parameters
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/k8s.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ rke2_node_prepare_sysctl | dict2items | map(attribute='key') | zip(rke2_node_prepare_sysctl | dict2items | map(attribute='value')) | map('join', ' = ') | join('\n') }}\n"
+  when:
+    - rke2_node_prepare_enabled | bool
+    - rke2_node_prepare_sysctl | length > 0
+
+- name: Apply Kubernetes sysctl parameters
+  ansible.builtin.command: sysctl --system
+  changed_when: false
+  when:
+    - rke2_node_prepare_enabled | bool
+    - rke2_node_prepare_sysctl | length > 0
+
+- name: Disable swap for current boot
+  ansible.builtin.command: swapoff -a
+  changed_when: false
+  when:
+    - rke2_node_prepare_enabled | bool
+    - rke2_node_prepare_disable_swap | bool
+
+- name: Disable swap entries in fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\sswap\s.*)$'
+    replace: '#\1'
+  when:
+    - rke2_node_prepare_enabled | bool
+    - rke2_node_prepare_disable_swap | bool
+
+- name: Disable UFW on Debian nodes
+  ansible.builtin.systemd:
+    name: ufw
+    state: stopped
+    enabled: false
+  failed_when: false
+  when:
+    - rke2_node_prepare_enabled | bool
+    - rke2_node_prepare_disable_firewall | bool
+    - ansible_facts.os_family == 'Debian'
+
+- name: Disable firewalld on RedHat nodes
+  ansible.builtin.systemd:
+    name: firewalld
+    state: stopped
+    enabled: false
+  failed_when: false
+  when:
+    - rke2_node_prepare_enabled | bool
+    - rke2_node_prepare_disable_firewall | bool
+    - ansible_facts.os_family == 'RedHat'

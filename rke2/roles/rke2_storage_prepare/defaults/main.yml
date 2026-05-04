@@ -1,0 +1,14 @@
+---
+rke2_storage_prepare_enabled: false
+
+rke2_storage_prepare_debian_packages:
+  - nfs-common
+  - open-iscsi
+
+rke2_storage_prepare_redhat_packages:
+  - nfs-utils
+  - cryptsetup
+  - iscsi-initiator-utils
+
+rke2_storage_prepare_enable_iscsi: true
+

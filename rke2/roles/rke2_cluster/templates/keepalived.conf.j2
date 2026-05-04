@@ -1,0 +1,24 @@
+vrrp_script chk_rke2 {
+  script "systemctl is-active --quiet rke2-server"
+  interval 2
+  weight 20
+}
+
+vrrp_instance rke2_vip {
+  state {{ 'MASTER' if inventory_hostname == groups[rke2_servers_group_name][0] else 'BACKUP' }}
+  interface {{ rke2_interface }}
+  virtual_router_id {{ rke2_keepalived_router_id }}
+  priority {{ 150 - (groups[rke2_servers_group_name].index(inventory_hostname) * 10) }}
+  advert_int 1
+  authentication {
+    auth_type PASS
+    auth_pass {{ rke2_keepalived_auth_pass }}
+  }
+  virtual_ipaddress {
+    {{ rke2_api_ip }}/{{ rke2_api_cidr }}
+  }
+  track_script {
+    chk_rke2
+  }
+}
+

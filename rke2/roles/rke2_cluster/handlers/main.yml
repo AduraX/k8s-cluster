@@ -1,0 +1,29 @@
+---
+- name: Update Debian CA trust
+  ansible.builtin.command: update-ca-certificates
+  changed_when: true
+  when: ansible_facts.os_family == 'Debian'
+  listen: Update CA trust
+
+- name: Update RedHat CA trust
+  ansible.builtin.command: update-ca-trust
+  changed_when: true
+  when: ansible_facts.os_family == 'RedHat'
+  listen: Update CA trust
+
+- name: Restart keepalived
+  ansible.builtin.systemd:
+    name: keepalived
+    state: restarted
+  when:
+    - rke2_ha_mode | bool
+    - rke2_ha_mode_keepalived | bool
+    - inventory_hostname in groups[rke2_servers_group_name]
+
+- name: Restart RKE2
+  ansible.builtin.systemd:
+    name: "{{ rke2_service_name }}"
+    state: restarted
+    daemon_reload: true
+  when:
+    - not ansible_check_mode

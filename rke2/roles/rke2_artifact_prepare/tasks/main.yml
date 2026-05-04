@@ -1,0 +1,88 @@
+---
+- name: Prepare local RKE2 airgap artifact directory
+  when: rke2_artifact_prepare_enabled | bool
+  run_once: true
+  delegate_to: localhost
+  become: false
+  block:
+    - name: Check active RKE2 artifact files
+      ansible.builtin.stat:
+        path: "{{ rke2_artifact_prepare_output_dir }}/{{ item }}"
+      loop: "{{ rke2_artifact + ['rke2.sh'] }}"
+      register: rke2_active_artifacts
+
+    - name: Set RKE2 artifact preparation requirement
+      ansible.builtin.set_fact:
+        rke2_artifact_prepare_required: "{{ not (rke2_active_artifacts.results | map(attribute='stat.exists') | min) }}"
+
+    - name: Report existing RKE2 artifacts
+      ansible.builtin.debug:
+        msg: "RKE2 artifacts already exist in {{ rke2_artifact_prepare_output_dir }}; skipping local artifact download."
+      when: not rke2_artifact_prepare_required | bool
+
+    - name: Create versioned artifact cache directory
+      ansible.builtin.file:
+        path: "{{ rke2_artifact_prepare_cache_dir }}"
+        state: directory
+        mode: "0755"
+      when: rke2_artifact_prepare_required | bool
+
+    - name: Download RKE2 checksum to local cache
+      ansible.builtin.get_url:
+        url: "{{ rke2_artifact_url }}/{{ rke2_version | replace('+', '%2B') }}/sha256sum-{{ rke2_architecture }}.txt"
+        dest: "{{ rke2_artifact_prepare_cache_dir }}/sha256sum-{{ rke2_architecture }}.txt"
+        mode: "0644"
+        timeout: "{{ rke2_artifact_fetch_timeout }}"
+      when: rke2_artifact_prepare_required | bool
+
+    - name: Download RKE2 tarball to local cache
+      ansible.builtin.get_url:
+        url: "{{ rke2_artifact_url }}/{{ rke2_version | replace('+', '%2B') }}/{{ item }}"
+        dest: "{{ rke2_artifact_prepare_cache_dir }}/{{ item }}"
+        mode: "0644"
+        timeout: "{{ rke2_artifact_fetch_timeout }}"
+      loop: "{{ rke2_artifact | reject('search', 'sha256sum') | list }}"
+      when: rke2_artifact_prepare_required | bool
+
+    - name: Download RKE2 install script to local cache
+      ansible.builtin.get_url:
+        url: "{{ rke2_install_bash_url }}"
+        dest: "{{ rke2_artifact_prepare_cache_dir }}/install-rke2.sh"
+        mode: "0755"
+        timeout: "{{ rke2_artifact_fetch_timeout }}"
+      when:
+        - rke2_artifact_prepare_required | bool
+        - not (rke2_artifact_prepare_install_script_source is exists)
+
+    - name: Create active artifact directory
+      ansible.builtin.file:
+        path: "{{ rke2_artifact_prepare_output_dir }}"
+        state: directory
+        mode: "0755"
+      when: rke2_artifact_prepare_required | bool
+
+    - name: Copy RKE2 artifacts into active artifact directory
+      ansible.builtin.copy:
+        src: "{{ rke2_artifact_prepare_cache_dir }}/{{ item }}"
+        dest: "{{ rke2_artifact_prepare_output_dir }}/{{ item }}"
+        mode: "0644"
+      loop: "{{ rke2_artifact }}"
+      when: rke2_artifact_prepare_required | bool
+
+    - name: Copy local custom RKE2 install script
+      ansible.builtin.copy:
+        src: "{{ rke2_artifact_prepare_install_script_source }}"
+        dest: "{{ rke2_artifact_prepare_output_dir }}/rke2.sh"
+        mode: "0755"
+      when:
+        - rke2_artifact_prepare_required | bool
+        - rke2_artifact_prepare_install_script_source is exists
+
+    - name: Copy downloaded RKE2 install script
+      ansible.builtin.copy:
+        src: "{{ rke2_artifact_prepare_cache_dir }}/install-rke2.sh"
+        dest: "{{ rke2_artifact_prepare_output_dir }}/rke2.sh"
+        mode: "0755"
+      when:
+        - rke2_artifact_prepare_required | bool
+        - not (rke2_artifact_prepare_install_script_source is exists)

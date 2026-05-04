@@ -1,0 +1,38 @@
+---
+- name: Log in to Harbor with Docker
+  ansible.builtin.command:
+    cmd: "docker login -u {{ rke2_harbor_username }} --password-stdin {{ rke2_harbor_url }}"
+    stdin: "{{ rke2_harbor_password }}"
+  changed_when: false
+  no_log: true
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+- name: Read airgap image list
+  ansible.builtin.set_fact:
+    airgap_images: "{{ lookup('ansible.builtin.file', rke2_harbor_airgap_image_list).splitlines() | reject('match', '^\\s*$') | list }}"
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+- name: Push airgap images to Harbor
+  ansible.builtin.shell: |
+    set -euo pipefail
+    image="{{ item }}"
+    source_registry="$(printf '%s' "$image" | cut -d/ -f 1)"
+    case "$source_registry" in
+      docker.io|quay.io|gcr.io|ghcr.io) target_registry="$source_registry" ;;
+      registry.k8s.io) target_registry="k8s.io" ;;
+      *) echo "Unsupported registry in image: $image" >&2; exit 2 ;;
+    esac
+    image_path="$(printf '%s' "$image" | cut -d/ -f 2-)"
+    docker pull "$image"
+    docker tag "$image" "{{ rke2_harbor_url }}/airgapped-${target_registry}/${image_path}"
+    docker push "{{ rke2_harbor_url }}/airgapped-${target_registry}/${image_path}"
+  args:
+    executable: /bin/bash
+  loop: "{{ airgap_images }}"
+  run_once: true
+  delegate_to: localhost
+  become: false

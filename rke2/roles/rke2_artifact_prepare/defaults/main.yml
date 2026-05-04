@@ -1,0 +1,16 @@
+---
+rke2_architecture: amd64
+rke2_artifact_url: https://github.com/rancher/rke2/releases/download/
+rke2_install_bash_url: https://get.rke2.io
+rke2_artifact_fetch_timeout: 30
+rke2_airgap_implementation: download
+rke2_airgap_copy_sourcepath: local_artifacts
+rke2_artifact_source: upstream
+rke2_artifact:
+  - sha256sum-{{ rke2_architecture }}.txt
+  - rke2.linux-{{ rke2_architecture }}.tar.gz
+
+rke2_artifact_prepare_enabled: "{{ rke2_artifact_source | default('upstream') == 'copy' }}"
+rke2_artifact_prepare_cache_dir: "{{ playbook_dir }}/dataDir/artifact_{{ (rke2_version | regex_replace('^v', '') | regex_replace('\\+.*$', '')).replace('.', '-') }}"
+rke2_artifact_prepare_output_dir: "{{ rke2_airgap_copy_sourcepath }}"
+rke2_artifact_prepare_install_script_source: "{{ playbook_dir }}/custom_rke2.sh"

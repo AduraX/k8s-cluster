@@ -1,0 +1,27 @@
+---
+- name: Install Debian Longhorn/NFS prerequisites
+  ansible.builtin.apt:
+    name: "{{ rke2_storage_prepare_debian_packages }}"
+    state: present
+    update_cache: true
+  when:
+    - rke2_storage_prepare_enabled | bool
+    - ansible_facts.os_family == 'Debian'
+
+- name: Install RedHat Longhorn/NFS prerequisites
+  ansible.builtin.dnf:
+    name: "{{ rke2_storage_prepare_redhat_packages }}"
+    state: present
+  when:
+    - rke2_storage_prepare_enabled | bool
+    - ansible_facts.os_family == 'RedHat'
+
+- name: Enable and start iSCSI daemon
+  ansible.builtin.systemd:
+    name: "{{ 'iscsid' if ansible_facts.os_family == 'Debian' else 'iscsid.service' }}"
+    state: started
+    enabled: true
+  when:
+    - rke2_storage_prepare_enabled | bool
+    - rke2_storage_prepare_enable_iscsi | bool
+

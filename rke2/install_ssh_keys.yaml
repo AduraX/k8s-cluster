@@ -1,0 +1,41 @@
+---
+- name: Install RKE2 SSH key on target nodes
+  hosts: all
+  gather_facts: false
+  vars:
+    rke2_ssh_public_key_file: "{{ lookup('env', 'HOME') }}/.ssh/id_ed25519-rke2.pub"
+    rke2_ssh_target_home: "{{ '/root' if ansible_user == 'root' else '/home/' ~ ansible_user }}"
+    rke2_ssh_public_key: "{{ lookup('ansible.builtin.file', rke2_ssh_public_key_file) }}"
+
+  tasks:
+    - name: Ensure SSH directory exists
+      ansible.builtin.file:
+        path: "{{ rke2_ssh_target_home }}/.ssh"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0700"
+
+    - name: Check authorized_keys file
+      ansible.builtin.stat:
+        path: "{{ rke2_ssh_target_home }}/.ssh/authorized_keys"
+      register: rke2_authorized_keys
+
+    - name: Create authorized_keys when missing
+      ansible.builtin.file:
+        path: "{{ rke2_ssh_target_home }}/.ssh/authorized_keys"
+        state: touch
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0600"
+      when: not rke2_authorized_keys.stat.exists
+
+    - name: Install RKE2 SSH public key
+      ansible.builtin.lineinfile:
+        path: "{{ rke2_ssh_target_home }}/.ssh/authorized_keys"
+        line: "{{ rke2_ssh_public_key }}"
+        state: present
+        create: true
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0600"

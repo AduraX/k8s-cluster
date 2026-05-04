@@ -1,0 +1,39 @@
+mirrors:
+  docker.io:
+    endpoint:
+      - "https://{{ rke2_custom_registry_url }}"
+    rewrite:
+      "(.*)": "{{ rke2_custom_registry_prefix }}-docker.io/$1"
+  quay.io:
+    endpoint:
+      - "https://{{ rke2_custom_registry_url }}"
+    rewrite:
+      "(.*)": "{{ rke2_custom_registry_prefix }}-quay.io/$1"
+  registry.k8s.io:
+    endpoint:
+      - "https://{{ rke2_custom_registry_url }}"
+    rewrite:
+      "(.*)": "{{ rke2_custom_registry_prefix }}-k8s.io/$1"
+  gcr.io:
+    endpoint:
+      - "https://{{ rke2_custom_registry_url }}"
+    rewrite:
+      "(.*)": "{{ rke2_custom_registry_prefix }}-gcr.io/$1"
+  ghcr.io:
+    endpoint:
+      - "https://{{ rke2_custom_registry_url }}"
+    rewrite:
+      "(.*)": "{{ rke2_custom_registry_prefix }}-ghcr.io/$1"
+  {{ rke2_custom_registry_url }}:
+    endpoint:
+      - "https://{{ rke2_custom_registry_url }}"
+
+configs:
+  "{{ rke2_custom_registry_url }}":
+{% if rke2_custom_registry_username | default('') | length > 0 and rke2_custom_registry_password | default('') | length > 0 %}
+    auth:
+      username: "{{ rke2_custom_registry_username }}"
+      password: "{{ rke2_custom_registry_password }}"
+{% endif %}
+    tls:
+      insecure_skip_verify: {{ rke2_custom_registry_insecure_skip_verify | bool | lower }}
